@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7.2
+    container_name: flashsale-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: flashsale-rabbitmq
+    ports:
+      - "5672:5672"     # port cho backend connect
+      - "15672:15672"   # web UI RabbitMQ
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    restart: unless-stopped
