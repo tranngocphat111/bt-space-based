@@ -1,9 +1,7 @@
 import axios from 'axios';
 import type { Product } from '../store/productsSlice';
-import { mockApi } from './mock';
 
-const API_BASE_URL = 'http://192.168.1.10:8080/api';
-const USE_MOCK = import.meta.env.DEV;
+const API_BASE_URL = 'http://192.168.1.62:8080/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -21,9 +19,7 @@ const getSessionId = (): string => {
 };
 
 export const getProducts = async (): Promise<Product[]> => {
-  if (USE_MOCK) {
-    return mockApi.getProducts();
-  }
+
   try {
     const response = await apiClient.get('/products');
     return response.data;
@@ -34,9 +30,7 @@ export const getProducts = async (): Promise<Product[]> => {
 };
 
 export const getProductDetail = async (productId: number): Promise<Product> => {
-  if (USE_MOCK) {
-    return mockApi.getProductDetail(productId);
-  }
+
   try {
     const response = await apiClient.get(`/products/${productId}`);
     return response.data;
@@ -47,14 +41,14 @@ export const getProductDetail = async (productId: number): Promise<Product> => {
 };
 
 export const addToCart = async (product: Product, quantity: number = 1): Promise<{ success: boolean }> => {
-  if (USE_MOCK) {
-    return mockApi.addToCart();
-  }
+
   try {
     const sessionId = getSessionId();
     const response = await apiClient.post('/cart/add', {
-      session_id: sessionId,
-      product_id: product.id,
+      userId: sessionId,
+      productId: product.id.toString(),
+      productName: product.name,
+      price: product.price,
       quantity: quantity,
     });
     return response.data;
@@ -65,13 +59,10 @@ export const addToCart = async (product: Product, quantity: number = 1): Promise
 };
 
 export const getCart = async () => {
-  if (USE_MOCK) {
-    return { items: [] };
-  }
   try {
     const sessionId = getSessionId();
     const response = await apiClient.get('/cart', {
-      params: { session_id: sessionId }
+      params: { userId: sessionId }
     });
     return response.data;
   } catch (error) {
@@ -80,8 +71,47 @@ export const getCart = async () => {
   }
 };
 
+export const removeFromCart = async (productId: number) => {
+  try {
+    const sessionId = getSessionId();
+    const response = await apiClient.delete('/cart/remove', {
+      params: { userId: sessionId, productId: productId.toString() }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error removing from cart:', error);
+    throw new Error('Không thể xóa sản phẩm khỏi giỏ hàng');
+  }
+};
+
+export const updateCartQuantity = async (productId: number, quantity: number) => {
+  try {
+    const sessionId = getSessionId();
+    const response = await apiClient.put('/cart/update', null, {
+      params: { userId: sessionId, productId: productId.toString(), quantity }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error updating cart quantity:', error);
+    throw new Error('Không thể cập nhật số lượng sản phẩm');
+  }
+};
+
+export const clearCartAPI = async () => {
+  try {
+    const sessionId = getSessionId();
+    await apiClient.delete('/cart/clear', {
+      params: { userId: sessionId }
+    });
+    return { success: true };
+  } catch (error) {
+    console.error('Error clearing cart:', error);
+    throw new Error('Không thể làm trống giỏ hàng');
+  }
+};
+
 export interface CheckoutRequest {
-  session_id: string;
+  userId: string;
   items: Array<{
     product_id: number;
     quantity: number;
@@ -91,15 +121,13 @@ export interface CheckoutRequest {
 }
 
 export const checkout = async (cartItems: any[]): Promise<{ orderId: string; success: boolean }> => {
-  if (USE_MOCK) {
-    return mockApi.checkout();
-  }
+
   try {
     const sessionId = getSessionId();
     
     // Build checkout request
     const checkoutRequest: CheckoutRequest = {
-      session_id: sessionId,
+      userId: sessionId,
       items: cartItems.map(item => ({
         product_id: item.id,
         quantity: item.quantity,
@@ -109,9 +137,9 @@ export const checkout = async (cartItems: any[]): Promise<{ orderId: string; suc
     };
 
     const response = await apiClient.post('/checkout', checkoutRequest);
-    
+    console.log(response.data);
     // Clear session on success
-    if (response.data.success) {
+    if (response.data) {
       sessionStorage.removeItem('sessionId');
     }
     
@@ -123,9 +151,7 @@ export const checkout = async (cartItems: any[]): Promise<{ orderId: string; suc
 };
 
 export const getStock = async (productId: number) => {
-  if (USE_MOCK) {
-    return { stock: 50 };
-  }
+
   try {
     const response = await apiClient.get(`/stock/${productId}`);
     return response.data;

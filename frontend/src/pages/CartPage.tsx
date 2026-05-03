@@ -1,32 +1,94 @@
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Trash2, Plus, Minus } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../hooks';
-import { removeFromCart, updateQuantity, setCartLoading, clearCart } from '../store/cartSlice';
-import { checkout } from '../api/client';
+import { getCart, removeFromCart, updateCartQuantity, clearCartAPI, checkout } from '../api/client';
 import { showToast } from '../utils/toast';
-import { useState } from 'react';
-
+import { useEffect, useState } from 'react';
+import { setProducts } from '../store/productsSlice';
+import { getProducts } from '../api/client';
 export function CartPage() {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
-  const cartItems = useAppSelector(state => state.cart.items);
-  const loading = useAppSelector(state => state.cart.loading);
+    const products = useAppSelector(state => state.products.items);
+
+  const [cartItems, setCartItems] = useState<[]>([]);
+  const [loading, setLoading] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  
 
   const total = cartItems.reduce((sum: number, item: any) => sum + item.price * item.quantity, 0);
   const itemCount = cartItems.reduce((sum: number, item: any) => sum + item.quantity, 0);
 
-  const handleRemove = (id: number) => {
-    dispatch(removeFromCart(id));
-    showToast.success('Đã xóa sản phẩm khỏi giỏ');
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  const fetchProducts = async () => {
+    try {
+      const data = await getProducts();
+      dispatch(setProducts(data));
+    } catch (error: any) {
+    } finally {
+    }
   };
 
-  const handleUpdateQuantity = (id: number, quantity: number) => {
+  const loadCart = async () => {
+    setLoading(true);
+    try {
+      const response = await getCart();
+      const hydratedItems = response.items.map((apiItem: any) => {
+        const p = products.find(p => p.id.toString() === apiItem.productId) || {};
+        return {
+          ...p,
+          id: Number(apiItem.productId),
+          name: apiItem.productName || (p as any).name,
+          price: apiItem.price || (p as any).price,
+          quantity: apiItem.quantity,
+          imageUrl: (p as any).image_url || (p as any).imageUrl,
+        };
+      });
+      setCartItems(hydratedItems);
+      console.log(hydratedItems);
+    } catch (error) {
+      showToast.error('Không thể tải giỏ hàng');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCart();
+  }, [products]);
+
+
+  const handleRemove = async (id: number) => {
+    try {
+      setLoading(true);
+      await removeFromCart(id);
+      await loadCart();
+      showToast.success('Đã xóa sản phẩm khỏi giỏ');
+    } catch (e) {
+      showToast.error('Không thể xóa sản phẩm khỏi giỏ');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateQuantity = async (id: number, quantity: number) => {
     if (quantity < 1) {
       handleRemove(id);
       return;
     }
-    dispatch(updateQuantity({ id, quantity }));
+    try {
+      setLoading(true);
+      await updateCartQuantity(id, quantity);
+      await loadCart();
+    } catch (e) {
+      showToast.error('Không thể cập nhật số lượng');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCheckout = async () => {
@@ -36,22 +98,23 @@ export function CartPage() {
     }
 
     setIsCheckingOut(true);
-    dispatch(setCartLoading(true));
+    setLoading(true);
 
     try {
       const result = await checkout(cartItems);
-      if (result.success) {
+      if (result) {
         showToast.success('Đặt hàng thành công! Cảm ơn bạn đã mua sắm.');
-        dispatch(clearCart());
+        await clearCartAPI();
+        setCartItems([]);
         setTimeout(() => navigate('/'), 1500);
       } else {
         showToast.error('Đặt hàng thất bại. Vui lòng thử lại.');
       }
     } catch (error: any) {
-      showToast.error(error.message || 'Không thể hoàn tất thanh toán');
+      showToast.error(error.message|| 'Không thể hoàn tất thanh toán');
     } finally {
       setIsCheckingOut(false);
-      dispatch(setCartLoading(false));
+      setLoading(false);
     }
   };
 
@@ -83,132 +146,57 @@ export function CartPage() {
             {/* Items */}
             <div className="lg:col-span-2 space-y-4">
               {cartItems.map((item: any) => (
-                <div
-                  key={item.id}
-                  className="bg-white rounded-lg shadow p-4 flex gap-4 hover:shadow-md transition-shadow"
-                >
-                  <img
-                    src={item.image_url || 'https://via.placeholder.com/100x100?text=No+Image'}
-                    alt={item.name}
-                    className="w-24 h-24 object-cover rounded"
-                  />
-                  <div className="flex-1">
-                    <h3 className="font-bold text-gray-800">{item.name}</h3>
-                    <p className="text-red-600 font-bold">
-                      {item.price.toLocaleString('vi-VN')} đ
-                    </p>
-                    <div className="flex items-center gap-2 mt-2">
-                      <button
-                        onClick={() => handleUpdateQuantity(item.id, item.quantity - 1)}
-                        className="p-1 hover:bg-gray-200 rounded transition-colors"
-                      >
-                        <Minus size={18} />
-                      </button>
-                      <span className="w-8 text-center font-semibold">{item.quantity}</span>
-                      <button
-                        onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)}
-                        className="p-1 hover:bg-gray-200 rounded transition-colors"
-                      >
-                        <Plus size={18} />
-                      </button>
-                      <button
-                        onClick={() => handleRemove(item.id)}
-                        className="ml-auto p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
-                      >
-                        <Trash2 size={20} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="text-right font-bold text-lg">
-                    {(item.price * item.quantity).toLocaleString('vi-VN')} đ
-                  </div>
-                </div>
-              ))}
-            </div>
+                <div key={item.id} className="bg-white rounded-xl shadow-md p-4 hover:shadow-lg transition-shadow">
+                  <div className="flex gap-4">
+                    {/* Image */}
+                    <img
+                      src={item.imageUrl}
+                      alt={item.name}
+                      className="w-24 h-24 object-cover rounded-lg"
+                    />
 
-            {/* Summary */}
-            <div className="bg-white rounded-lg shadow-lg p-6 h-fit sticky top-24">
-              <h2 className="text-xl font-bold mb-4">Tóm tắt đơn hàng</h2>
-              <div className="space-y-3 text-gray-600 mb-4 pb-4 border-b">
-                <div className="flex justify-between">
-                  <span>Tổng sản phẩm:</span>
-                  <span className="font-semibold">{itemCount}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Tổng giá:</span>
-                  <span className="font-semibold text-gray-800">
-                    {total.toLocaleString('vi-VN')} đ
-                  </span>
-                </div>
-              </div>
+                    {/* Info */}
+                    <div className="flex-1">
+                      <h3 className="font-bold text-gray-800 text-lg line-clamp-2 mb-2">
+                        {item.name}
+                      </h3>
+                      <p className="text-red-600 font-bold text-lg mb-3">
+                        {item.price.toLocaleString('vi-VN')} đ
+                      </p>
+                      <p className="text-gray-600 text-sm mb-3">
+                        Tổng: <span className="font-bold text-gray-800">
+                          {(item.price * item.quantity).toLocaleString('vi-VN')} đ
+                        </span>
+                      </p>
 
-              <button
-                onClick={handleCheckout}
-                disabled={isCheckingOut || loading}
-                className="w-full bg-red-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {isCheckingOut || loading ? 'Đang xử lý...' : 'Thanh toán'}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-                {cartItems.map((item: any) => (
-                  <div key={item.id} className="bg-white rounded-xl shadow-md p-4 hover:shadow-lg transition-shadow">
-                    <div className="flex gap-4">
-                      {/* Image */}
-                      <img
-                        src={item.image_url || 'https://via.placeholder.com/100'}
-                        alt={item.name}
-                        className="w-24 h-24 object-cover rounded-lg"
-                      />
-
-                      {/* Info */}
-                      <div className="flex-1">
-                        <h3 className="font-bold text-gray-800 text-lg line-clamp-2 mb-2">
-                          {item.name}
-                        </h3>
-                        <p className="text-red-600 font-bold text-lg mb-3">
-                          {item.price.toLocaleString('vi-VN')} đ
-                        </p>
-                        <p className="text-gray-600 text-sm mb-3">
-                          Tổng: <span className="font-bold text-gray-800">
-                            {(item.price * item.quantity).toLocaleString('vi-VN')} đ
-                          </span>
-                        </p>
-
-                        {/* Quantity & Delete */}
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-lg">
-                            <button
-                              onClick={() => handleUpdateQuantity(item.id, item.quantity - 1)}
-                              className="p-1 hover:bg-gray-200 rounded transition-colors"
-                            >
-                              <Minus size={16} />
-                            </button>
-                            <span className="font-bold w-8 text-center">{item.quantity}</span>
-                            <button
-                              onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)}
-                              className="p-1 hover:bg-gray-200 rounded transition-colors"
-                            >
-                              <Plus size={16} />
-                            </button>
-                          </div>
+                      {/* Quantity & Delete */}
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-lg">
                           <button
-                            onClick={() => handleRemove(item.id)}
-                            className="ml-auto p-2 hover:bg-red-100 text-red-600 rounded transition-colors"
+                            onClick={() => handleUpdateQuantity(item.id, item.quantity - 1)}
+                            className="p-1 hover:bg-gray-200 rounded transition-colors"
                           >
-                            <Trash2 size={20} />
+                            <Minus size={16} />
+                          </button>
+                          <span className="font-bold w-8 text-center">{item.quantity}</span>
+                          <button
+                            onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)}
+                            className="p-1 hover:bg-gray-200 rounded transition-colors"
+                          >
+                            <Plus size={16} />
                           </button>
                         </div>
+                        <button
+                          onClick={() => handleRemove(item.id)}
+                          className="ml-auto p-2 hover:bg-red-100 text-red-600 rounded transition-colors"
+                        >
+                          <Trash2 size={20} />
+                        </button>
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
 
             {/* Summary */}

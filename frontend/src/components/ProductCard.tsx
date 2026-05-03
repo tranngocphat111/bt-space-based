@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShoppingBag, Eye } from 'lucide-react';
-import { useAppDispatch } from '../hooks';
-import { addToCart } from '../store/cartSlice';
+import { addToCart } from '../api/client';
 import type { Product } from '../store/productsSlice';
 import { showToast } from '../utils/toast';
 
@@ -12,7 +11,6 @@ interface ProductCardProps {
 
 export function ProductCard({ product }: ProductCardProps) {
   const navigate = useNavigate();
-  const dispatch = useAppDispatch();
   const [isLoading, setIsLoading] = useState(false);
 
   const maxStock = 100;
@@ -24,7 +22,7 @@ export function ProductCard({ product }: ProductCardProps) {
 
     setIsLoading(true);
     try {
-      dispatch(addToCart(product));
+      await addToCart(product, 1);
       showToast.success(`Đã thêm "${product.name}" vào giỏ`);
     } catch (error) {
       showToast.error('Không thể thêm sản phẩm vào giỏ');
@@ -41,7 +39,7 @@ export function ProductCard({ product }: ProductCardProps) {
     <div className="bg-white rounded-xl shadow-md hover:shadow-xl transition-shadow overflow-hidden h-full flex flex-col">
       <div className="relative h-48 overflow-hidden bg-gray-200">
         <img
-          src={product.image_url || 'https://via.placeholder.com/300x300?text=No+Image'}
+          src={product.imageUrl}
           alt={product.name}
           className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
         />

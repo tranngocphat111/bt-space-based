@@ -1,12 +1,29 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShoppingCart, Zap } from 'lucide-react';
-import { useAppSelector } from '../hooks';
+import { getCart } from '../api/client';
 
 export function Header() {
   const navigate = useNavigate();
-  const cartItems = useAppSelector(state => state.cart.items);
+  const [cartCount, setCartCount] = useState(0);
   const [countdown, setCountdown] = useState('00:30:00');
+
+  const loadCartCount = async () => {
+    try {
+      const response = await getCart();
+      const count = response.items.reduce((sum: number, item: any) => sum + item.quantity, 0);
+      setCartCount(count);
+    } catch (error) {
+      console.error('Error loading cart count:', error);
+    }
+  };
+
+  useEffect(() => {
+    loadCartCount();
+    // Poll every 5 seconds to keep count in sync
+    const interval = setInterval(loadCartCount, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -29,7 +46,7 @@ export function Header() {
     return () => clearInterval(interval);
   }, []);
 
-  const cartCount = cartItems.reduce((sum: number, item: any) => sum + item.quantity, 0);
+
 
   return (
     <header className="sticky top-0 z-40 bg-red-600 text-white shadow-lg">

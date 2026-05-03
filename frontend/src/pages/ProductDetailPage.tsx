@@ -1,18 +1,16 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { ChevronLeft, Plus, Minus, ShoppingBag } from 'lucide-react';
-import { useAppDispatch, useAppSelector } from '../hooks';
-import { addToCart } from '../store/cartSlice';
+import { useAppSelector } from '../hooks';
+import { addToCart } from '../api/client';
 import { showToast } from '../utils/toast';
 
 export function ProductDetailPage() {
   const { productId } = useParams<{ productId: string }>();
   const navigate = useNavigate();
-  const dispatch = useAppDispatch();
+  const products = useAppSelector(state => state.products.items);
   const [quantity, setQuantity] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
-
-  const products = useAppSelector(state => state.products.items);
   const product = products.find((p: any) => p.id === Number(productId));
 
   if (!product) {
@@ -40,9 +38,7 @@ export function ProductDetailPage() {
 
     setIsLoading(true);
     try {
-      for (let i = 0; i < quantity; i++) {
-        dispatch(addToCart(product));
-      }
+      await addToCart(product, quantity);
       showToast.success(`Đã thêm ${quantity} sản phẩm vào giỏ`);
       setQuantity(1);
     } catch (error) {
@@ -65,9 +61,7 @@ export function ProductDetailPage() {
 
     setIsLoading(true);
     try {
-      for (let i = 0; i < quantity; i++) {
-        dispatch(addToCart(product));
-      }
+      await addToCart(product, quantity);
       showToast.success('Thêm vào giỏ thành công!');
       setTimeout(() => navigate('/cart'), 500);
     } catch (error) {
@@ -92,7 +86,7 @@ export function ProductDetailPage() {
           {/* Image */}
           <div className="flex items-center justify-center bg-gray-100 rounded-lg h-96">
             <img
-              src={product.image_url || 'https://via.placeholder.com/400x400?text=No+Image'}
+              src={product.imageUrl || 'https://via.placeholder.com/400x400?text=No+Image'}
               alt={product.name}
               className="w-full h-full object-cover rounded-lg"
             />
