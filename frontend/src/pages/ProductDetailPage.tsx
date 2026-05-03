@@ -33,6 +33,11 @@ export function ProductDetailPage() {
       return;
     }
 
+    if (isSoldOut) {
+      showToast.error('Sản phẩm đã hết hàng');
+      return;
+    }
+
     setIsLoading(true);
     try {
       for (let i = 0; i < quantity; i++) {
@@ -48,15 +53,23 @@ export function ProductDetailPage() {
   };
 
   const handleBuyNow = async () => {
-    if (isSoldOut) return;
+    if (isSoldOut) {
+      showToast.error('Sản phẩm đã hết hàng');
+      return;
+    }
+
+    if (quantity < 1) {
+      showToast.error('Số lượng phải ≥ 1');
+      return;
+    }
 
     setIsLoading(true);
     try {
       for (let i = 0; i < quantity; i++) {
         dispatch(addToCart(product));
       }
-      showToast.success('Đặt hàng thành công!');
-      navigate('/cart');
+      showToast.success('Thêm vào giỏ thành công!');
+      setTimeout(() => navigate('/cart'), 500);
     } catch (error) {
       showToast.error('Rất tiếc! Sản phẩm đã hết hàng');
     } finally {

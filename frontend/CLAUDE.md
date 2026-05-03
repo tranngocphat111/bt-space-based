@@ -1,80 +1,80 @@
-# Flash Sale System - Frontend Guide (Người 1)
+# Flash Sale System - Team Collaboration Guide (Space-Based Architecture)
 
-## 1. Tech Stack
-- Framework: ReactJS (Vite)
-- State Management: Redux Toolkit hoặc React Query (để handle cache Data Grid)
-- Styling: Tailwind CSS
-- Icons: Lucide React hoặc Heroicons
+## 1. Tổng quan Kiến trúc (Space-Based Architecture)
+Hệ thống được thiết kế để chịu tải cực cao (1000+ request/s) trong sự kiện Flash Sale. 
+Để không bị nghẽn ở Database, hệ thống áp dụng cơ chế xử lý In-Memory kết hợp Async Persistence (Ghi bất đồng bộ) thông qua RabbitMQ theo đúng sơ đồ kiến trúc:
+- **Data Grid:** Sử dụng Redis và Hazelcast làm bộ nhớ chia sẻ.
+- **Messaging (RabbitMQ):** Đóng vai trò làm bộ đệm (buffer) để ghi dữ liệu từ RAM xuống Database, và đồng bộ dữ liệu ngược lại.
+- **Processing Units (PUs):** Xử lý logic nghiệp vụ hoàn toàn trên RAM.
 
-## 2. API Architecture (via API Gateway)
-Tất cả các request phải đi qua Gateway tại IP: `192.168.1.10:8080`
+> 🛑 **STRICT DIRECTIVE FOR AI:**
+> Phạm vi công việc của tôi CHỈ BAO GỒM:
+> 1. **Giao diện Frontend (ReactJS)**.
+> 2. **Các Background Workers xử lý RabbitMQ (Java/Spring Boot)**.
+> 
+> Lệnh cấm: TUYỆT ĐỐI KHÔNG generate, không sửa code của các API Gateway, Processing Units (PU1, PU2, PU3, PU4). Đó là công việc của các thành viên khác trong team.
 
-| Chức năng | Method | Endpoint | PU xử lý |
+## 2. Tech Stack Toàn Hệ Thống
+- **Frontend (Người 1):** ReactJS (Vite), Tailwind CSS, Axios.
+- **API Gateway:** Spring Cloud Gateway.
+- **Backend (PUs & Workers):** Spring Boot.
+- **Data Grids:** Redis & Hazelcast.
+- **Message Broker:** RabbitMQ.
+- **Database:** MariaDB.
+
+## 3. Cổng điều hướng (API Gateway)
+Tất cả request từ ReactJS (Frontend) phải đi qua API Gateway tại IP dự kiến: `http://192.168.1.10:8080`.
+
+| Chức năng | Method | Endpoint | Service xử lý |
 | :--- | :--- | :--- | :--- |
-| Lấy danh sách sản phẩm | GET | `/api/products` | PU1 - Product |
-| Thêm sản phẩm vào giỏ | POST | `/api/cart/add` | PU2 - Cart |
-| Xem giỏ hàng | GET | `/api/cart` | PU2 - Cart |
-| Đặt hàng (Flash Sale) | POST | `/api/checkout` | PU3 - Order |
-| Xem tồn kho real-time | GET | `/api/stock/{id}` | PU4 - Inventory |
+| Lấy danh sách sản phẩm | GET | `/api/products` | PU2 (Product/Query) |
+| Đặt hàng (Flash Sale) | POST | `/api/checkout` | PU1 (Order/Command) |
 
-## typescript
+---
+
+## 4. Đặc tả luồng xử lý Backend (Dựa trên Sơ đồ)
+
+Sơ đồ kiến trúc chia làm các khối sau, team Backend cần tuân thủ tuyệt đối:
+
+### A. Khối Xử lý Giao dịch (PU1 & Hazelcast)
+- **Nhiệm vụ:** Xử lý các thao tác thay đổi dữ liệu (Command) như Checkout, Giảm tồn kho.
+- **Luồng hoạt động:**
+  1. Gateway nhận request `/api/checkout` và đẩy cho **PU1**.
+  2. PU1 trừ tồn kho trực tiếp trên Memory Grid (**Hazelcast**).
+  3. Nếu thành công, PU1 trả về `HTTP 200` ngay lập tức cho Frontend.
+  4. Đồng thời, PU1 publish một event (ví dụ: `order_created`) vào RabbitMQ queue có tên là **`mq`**. Tuyệt đối PU1 không gọi trực tiếp vào MariaDB.
+
+### B. Khối Truy vấn Dữ liệu (PU2 & Redis)
+- **Nhiệm vụ:** Xử lý các thao tác đọc dữ liệu (Query) như lấy danh sách sản phẩm, xem giỏ hàng.
+- **Luồng hoạt động:**
+  1. Gateway nhận request `/api/products` và đẩy cho **PU2**.
+  2. PU2 chỉ được phép đọc dữ liệu từ **Redis** và trả về cho Frontend.
+  3. Nếu Redis bị thiếu dữ liệu (Cache Miss), PU2 sẽ đẩy một message yêu cầu đồng bộ vào RabbitMQ queue có tên là **`mq-read`**.
+
+### C. Khối Background Workers (Dịch vụ Xanh lá trên sơ đồ)
+### 1. Service: `write` worker (Data Writer)
+- **Message Broker:** Lắng nghe liên tục trên queue **`mq`**.
+- **Nguồn phát (Producer):** PU3 (Order PU) sẽ ném event vào `mq` ngay khi user checkout thành công trên Data Grid[cite: 2].
+- **Nhiệm vụ Xử lý:**
+  - Nhận payload JSON từ `mq` (gồm: session_id, product_id, quantity, total_amount).
+  - Mở transaction DB: `INSERT` vào bảng `orders`, `INSERT` vào bảng `order_items`.
+  - `UPDATE` giảm `stock` tương ứng trong bảng `inventory`.
+  - Ghi chú: Việc này giúp bảo vệ DB khỏi 1000+ RPS, mọi thao tác ghi sẽ được worker này xử lý tuần tự/batch.
+
+### 2. Service: `read` worker (Data Pump / DataLoader)
+- **Nhiệm vụ 1 (Bootstrapping):** Khi khởi động service, quét bảng `products` (join `inventory`) và nạp thẳng toàn bộ danh sách sản phẩm cùng số lượng tồn kho lên **Redis** (cho PU1, PU2 đọc) và **Hazelcast**.
+- **Nhiệm vụ 2 (Lắng nghe):** Subscribe queue **`mq-read`**.
+- **Xử lý:** Khi PU2 (truy vấn) không tìm thấy data trong Redis (Cache Miss), nó sẽ bắn event vào `mq-read`. Worker này sẽ đọc DB và đẩy ngược lại vào Redis để phục hồi cache.
+
+
+## 5. Cấu trúc Dữ Liệu (Interface Dành Cho Frontend)
+
+```typescript
 interface Product {
   id: number;
   name: string; // e.g., "iPhone 15 Pro Max 256GB"
-  description: string; // e.g., "Chip A17 Pro, Camera 48MP, Titanium"
   price: number; // e.g., 28990000.00
   image_url: string; 
   category: string;
-  stock: number; // Mapped from 'inventory' table, crucial for Flash Sale logic
+  stock: number; // Được PU2 lấy từ Redis
 }
-
-
-
-## 6. Mô tả giao diện chi tiết (UI Specifications)
-
-Yêu cầu AI (Claude) thiết kế giao diện theo phong cách e-commerce Flash Sale (giống Shopee/Lazada) với cảm giác khẩn trương, tốc độ và mượt mà.
-
-### 6.1. Tổng quan (Global/Layout)
-- **Background:** Màu xám nhạt (`bg-gray-50` hoặc `bg-gray-100`) để làm nổi bật các thẻ sản phẩm.
-- **Font:** Ưu tiên phông chữ sans-serif hiện đại, dễ đọc.
-- **Màu chủ đạo (Primary Color):** Đỏ (`text-red-600`, `bg-red-600`) và Vàng (`bg-yellow-400`) để nhấn mạnh sự kiện Flash Sale.
-
-### 6.2. Header (Thanh điều hướng trên cùng)
-- **Vị trí:** Cố định ở trên cùng (`sticky top-0`, `z-50`).
-- **Màu sắc:** Nền đỏ (`bg-red-600`), chữ trắng.
-- **Bố cục (Flexbox):**
-  - **Trái:** Logo hoặc Text "⚡ FLASH SALE TECH" (In đậm, nghiêng).
-  - **Giữa (Optional):** Đồng hồ đếm ngược (Countdown Timer) - ví dụ: "Kết thúc trong 00:15:30".
-  - **Phải:** Icon Giỏ hàng. Có một badge (chấm tròn đỏ/vàng) đè lên góc icon để hiển thị tổng số lượng sản phẩm trong giỏ.
-
-### 6.3. Product List (Danh sách sản phẩm)
-- **Container:** Nằm giữa màn hình, giới hạn chiều rộng (`max-w-7xl mx-auto`, `p-4`).
-- **Bố cục Grid:** Responsive. Mobile hiển thị 1 cột, Tablet 2 cột, Desktop 3-4 cột (`grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6`).
-
-### 6.4. Product Card (Thẻ chi tiết từng sản phẩm)
-Đây là component quan trọng nhất, cần các thành phần sau:
-- **Khung (Wrapper):** Nền trắng, bo góc (`rounded-xl`), có bóng đổ (`shadow-md`), hover thì bóng đổ đậm hơn (`hover:shadow-xl`).
-- **Hình ảnh (Image):** Cố định chiều cao (vd: `h-48`), `object-cover`, nằm trên cùng của thẻ.
-- **Nội dung:**
-  - **Tên sản phẩm:** `text-lg`, in đậm, cắt chữ nếu quá 2 dòng (`line-clamp-2`).
-  - **Giá Flash Sale:** `text-red-500`, in đậm, kích thước lớn (`text-xl`), format theo chuẩn VND (vd: 28.990.000 đ).
-- **Thanh trạng thái tồn kho (Stock Progress Bar - Quan trọng):**
-  - Phía trên thanh: Text nhỏ ghi "Đang bán chạy" hoặc "Còn lại: {stock}".
-  - Thanh bar: Background xám (`bg-gray-200`), phần lõi màu đỏ/cam hoặc dải màu gradient tương ứng với % tồn kho còn lại (`w-[percentage]%`). Hình ảnh trực quan kích thích người mua.
-- **Action Buttons (2 nút):**
-  - Nút "Thêm giỏ": Outline hoặc màu xám nhạt.
-  - Nút "MUA NGAY": Nền đỏ chữ trắng, full width.
-  - **Trạng thái Disable:** Nếu `stock === 0`, đổi nút "MUA NGAY" thành "ĐÃ BÁN HẾT", màu xám (`bg-gray-400`), không cho click (`cursor-not-allowed`, `disabled`).
-
-### 6.5. Cart Modal / Off-canvas (Giỏ hàng)
-- Khi click vào Icon Giỏ hàng trên Header, mở ra một Sidebar trượt từ phải sang (Off-canvas) hoặc một Modal ở giữa màn hình.
-- **Nội dung:**
-  - Danh sách các item: Ảnh thu nhỏ, tên, giá, số lượng (nút + / -).
-  - Tổng tiền (Total amount).
-  - Nút "TIẾN HÀNH THANH TOÁN" (Checkout) to, rõ ràng ở dưới cùng.
-
-### 6.6. Trạng thái & Phản hồi (States & Feedbacks)
-- **Loading State:** Khi bấm "Mua ngay" hoặc "Checkout", hiển thị icon spinner loading nhỏ trên nút, vô hiệu hóa nút để tránh spam click.
-- **Toast Notifications (Góc màn hình):**
-  - Thành công: Thông báo xanh lá "Đặt hàng thành công! Đã trừ kho in-memory."
-  - Thất bại/Hết hàng: Thông báo đỏ "Rất tiếc! Sản phẩm đã hết hàng trong chớp mắt."

@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Trash2, Plus, Minus } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../hooks';
-import { removeFromCart, updateQuantity, setCartLoading } from '../store/cartSlice';
+import { removeFromCart, updateQuantity, setCartLoading, clearCart } from '../store/cartSlice';
 import { checkout } from '../api/client';
 import { showToast } from '../utils/toast';
 import { useState } from 'react';
@@ -39,9 +39,14 @@ export function CartPage() {
     dispatch(setCartLoading(true));
 
     try {
-      await checkout();
-      showToast.success('Đặt hàng thành công! Cảm ơn bạn đã mua sắm.');
-      navigate('/');
+      const result = await checkout(cartItems);
+      if (result.success) {
+        showToast.success('Đặt hàng thành công! Cảm ơn bạn đã mua sắm.');
+        dispatch(clearCart());
+        setTimeout(() => navigate('/'), 1500);
+      } else {
+        showToast.error('Đặt hàng thất bại. Vui lòng thử lại.');
+      }
     } catch (error: any) {
       showToast.error(error.message || 'Không thể hoàn tất thanh toán');
     } finally {
@@ -76,8 +81,81 @@ export function CartPage() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Items */}
-            <div className="lg:col-span-2">
-              <div className="space-y-4">
+            <div className="lg:col-span-2 space-y-4">
+              {cartItems.map((item: any) => (
+                <div
+                  key={item.id}
+                  className="bg-white rounded-lg shadow p-4 flex gap-4 hover:shadow-md transition-shadow"
+                >
+                  <img
+                    src={item.image_url || 'https://via.placeholder.com/100x100?text=No+Image'}
+                    alt={item.name}
+                    className="w-24 h-24 object-cover rounded"
+                  />
+                  <div className="flex-1">
+                    <h3 className="font-bold text-gray-800">{item.name}</h3>
+                    <p className="text-red-600 font-bold">
+                      {item.price.toLocaleString('vi-VN')} đ
+                    </p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <button
+                        onClick={() => handleUpdateQuantity(item.id, item.quantity - 1)}
+                        className="p-1 hover:bg-gray-200 rounded transition-colors"
+                      >
+                        <Minus size={18} />
+                      </button>
+                      <span className="w-8 text-center font-semibold">{item.quantity}</span>
+                      <button
+                        onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)}
+                        className="p-1 hover:bg-gray-200 rounded transition-colors"
+                      >
+                        <Plus size={18} />
+                      </button>
+                      <button
+                        onClick={() => handleRemove(item.id)}
+                        className="ml-auto p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
+                      >
+                        <Trash2 size={20} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="text-right font-bold text-lg">
+                    {(item.price * item.quantity).toLocaleString('vi-VN')} đ
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Summary */}
+            <div className="bg-white rounded-lg shadow-lg p-6 h-fit sticky top-24">
+              <h2 className="text-xl font-bold mb-4">Tóm tắt đơn hàng</h2>
+              <div className="space-y-3 text-gray-600 mb-4 pb-4 border-b">
+                <div className="flex justify-between">
+                  <span>Tổng sản phẩm:</span>
+                  <span className="font-semibold">{itemCount}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Tổng giá:</span>
+                  <span className="font-semibold text-gray-800">
+                    {total.toLocaleString('vi-VN')} đ
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={handleCheckout}
+                disabled={isCheckingOut || loading}
+                className="w-full bg-red-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isCheckingOut || loading ? 'Đang xử lý...' : 'Thanh toán'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
                 {cartItems.map((item: any) => (
                   <div key={item.id} className="bg-white rounded-xl shadow-md p-4 hover:shadow-lg transition-shadow">
                     <div className="flex gap-4">

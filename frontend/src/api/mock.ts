@@ -82,6 +82,17 @@ export const mockApi = {
     });
   },
 
+  getProductDetail: async (productId: number): Promise<Product> => {
+    return new Promise((resolve, reject) => {
+      const product = MOCK_PRODUCTS.find(p => p.id === productId);
+      if (product) {
+        setTimeout(() => resolve(product), 500);
+      } else {
+        setTimeout(() => reject(new Error('Product not found')), 500);
+      }
+    });
+  },
+
   addToCart: async (): Promise<{ success: boolean }> => {
     return new Promise(resolve => {
       setTimeout(() => resolve({ success: true }), 300);

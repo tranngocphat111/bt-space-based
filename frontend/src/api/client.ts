@@ -10,41 +10,129 @@ const apiClient = axios.create({
   timeout: 10000,
 });
 
+// Get or create session ID
+const getSessionId = (): string => {
+  let sessionId = sessionStorage.getItem('sessionId');
+  if (!sessionId) {
+    sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    sessionStorage.setItem('sessionId', sessionId);
+  }
+  return sessionId;
+};
+
 export const getProducts = async (): Promise<Product[]> => {
   if (USE_MOCK) {
     return mockApi.getProducts();
   }
-  const response = await apiClient.get('/products');
-  return response.data;
+  try {
+    const response = await apiClient.get('/products');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching products:', error);
+    throw new Error('Không thể tải danh sách sản phẩm');
+  }
 };
 
-export const addToCart = async (): Promise<{ success: boolean }> => {
+export const getProductDetail = async (productId: number): Promise<Product> => {
+  if (USE_MOCK) {
+    return mockApi.getProductDetail(productId);
+  }
+  try {
+    const response = await apiClient.get(`/products/${productId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching product detail:', error);
+    throw new Error('Không thể tải thông tin sản phẩm');
+  }
+};
+
+export const addToCart = async (product: Product, quantity: number = 1): Promise<{ success: boolean }> => {
   if (USE_MOCK) {
     return mockApi.addToCart();
   }
-  const response = await apiClient.post('/cart/add');
-  return response.data;
+  try {
+    const sessionId = getSessionId();
+    const response = await apiClient.post('/cart/add', {
+      session_id: sessionId,
+      product_id: product.id,
+      quantity: quantity,
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error adding to cart:', error);
+    throw new Error('Không thể thêm sản phẩm vào giỏ');
+  }
 };
 
 export const getCart = async () => {
   if (USE_MOCK) {
     return { items: [] };
   }
-  const response = await apiClient.get('/cart');
-  return response.data;
+  try {
+    const sessionId = getSessionId();
+    const response = await apiClient.get('/cart', {
+      params: { session_id: sessionId }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching cart:', error);
+    throw new Error('Không thể tải giỏ hàng');
+  }
 };
 
-export const checkout = async (): Promise<{ orderId: string; success: boolean }> => {
+export interface CheckoutRequest {
+  session_id: string;
+  items: Array<{
+    product_id: number;
+    quantity: number;
+    unit_price: number;
+  }>;
+  total_amount: number;
+}
+
+export const checkout = async (cartItems: any[]): Promise<{ orderId: string; success: boolean }> => {
   if (USE_MOCK) {
     return mockApi.checkout();
   }
-  const response = await apiClient.post('/checkout');
-  return response.data;
+  try {
+    const sessionId = getSessionId();
+    
+    // Build checkout request
+    const checkoutRequest: CheckoutRequest = {
+      session_id: sessionId,
+      items: cartItems.map(item => ({
+        product_id: item.id,
+        quantity: item.quantity,
+        unit_price: item.price,
+      })),
+      total_amount: cartItems.reduce((sum: number, item: any) => sum + item.price * item.quantity, 0),
+    };
+
+    const response = await apiClient.post('/checkout', checkoutRequest);
+    
+    // Clear session on success
+    if (response.data.success) {
+      sessionStorage.removeItem('sessionId');
+    }
+    
+    return response.data;
+  } catch (error: any) {
+    console.error('Error during checkout:', error);
+    throw new Error(error.response?.data?.message || 'Không thể hoàn tất thanh toán');
+  }
 };
 
 export const getStock = async (productId: number) => {
-  const response = await apiClient.get(`/stock/${productId}`);
-  return response.data;
+  if (USE_MOCK) {
+    return { stock: 50 };
+  }
+  try {
+    const response = await apiClient.get(`/stock/${productId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching stock:', error);
+    throw new Error('Không thể kiểm tra kho');
+  }
 };
 
 export default apiClient;
