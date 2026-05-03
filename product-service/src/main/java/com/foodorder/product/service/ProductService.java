@@ -63,9 +63,19 @@ public class ProductService {
                         objectMapper.getTypeFactory().constructCollectionType(List.class, ProductResponse.class)
                 );
                 
-                // Map lại để lấy đúng đường link ảnh
+                // Map lại để lấy đúng đường link ảnh và bổ sung thông tin tồn kho từ key inventory
                 return products.stream()
-                        .map(productMapper::mapToResponse)
+                        .map(p -> {
+                            // 1. Map lại image URL
+                            ProductResponse mapped = productMapper.mapToResponse(p);
+                            
+                            // 2. Lấy stock từ key inventory:{id}
+                            String inventoryKey = "inventory:" + mapped.getId();
+                            String stockStr = redisTemplate.opsForValue().get(inventoryKey);
+                            mapped.setStock(stockStr != null ? Integer.parseInt(stockStr) : 0);
+                            
+                            return mapped;
+                        })
                         .collect(java.util.stream.Collectors.toList());
             }
         } catch (Exception ex) {
@@ -103,7 +113,14 @@ public class ProductService {
                 ProductResponse product = objectMapper.readValue(cachedData, ProductResponse.class);
                 
                 // Map lại để lấy đúng đường link ảnh
-                return productMapper.mapToResponse(product);
+                ProductResponse mapped = productMapper.mapToResponse(product);
+                
+                // Bổ sung thông tin tồn kho từ key inventory:{id}
+                String inventoryKey = "inventory:" + mapped.getId();
+                String stockStr = redisTemplate.opsForValue().get(inventoryKey);
+                mapped.setStock(stockStr != null ? Integer.parseInt(stockStr) : 0);
+                
+                return mapped;
             }
         } catch (Exception ex) {
             log.warn("Error reading from Redis cache for product {}: {}", productId, ex.getMessage());

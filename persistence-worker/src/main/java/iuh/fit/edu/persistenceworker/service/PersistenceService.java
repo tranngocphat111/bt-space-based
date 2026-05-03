@@ -1,6 +1,7 @@
 package iuh.fit.edu.persistenceworker.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import iuh.fit.edu.persistenceworker.dto.OrderDto;
 import iuh.fit.edu.persistenceworker.dto.ProductWithStockDto;
 import iuh.fit.edu.persistenceworker.entity.Inventory;
 import iuh.fit.edu.persistenceworker.entity.Order;
@@ -51,53 +52,51 @@ public class PersistenceService {
     // ============ WRITE OPERATIONS ============
 
     @Transactional
-    public void persistCheckout(String sessionId, Integer productId, Short  quantity, BigDecimal totalAmount, BigDecimal unitPrice) {
+    public void persistOrder(OrderDto orderDto) {
         long startTime = System.currentTimeMillis();
-        
         try {
-            log.info("Processing checkout: sessionId={}, productId={}, quantity={}, totalAmount={}",
-                    sessionId, productId, quantity, totalAmount);
+            log.info("Processing OrderDto persistence: id={}, sessionId={}, items={}",
+                    orderDto.getId(), orderDto.getSessionId(), orderDto.getItems().size());
 
-            // Step 1: Create Order
+            // 1. Save Order (khớp id từ Redis để đồng bộ)
             Order order = Order.builder()
-                    .sessionId(sessionId)
-                    .status(Order.OrderStatus.confirmed)
-                    .totalAmount(totalAmount)
-                    .createdAt(LocalDateTime.now())
-                    .updatedAt(LocalDateTime.now())
+                    .id(orderDto.getId()) // Giữ nguyên ID từ Redis
+                    .sessionId(orderDto.getSessionId())
+                    .status(Order.OrderStatus.valueOf(orderDto.getStatus()))
+                    .totalAmount(orderDto.getTotalAmount())
+                    .createdAt(orderDto.getCreatedAt())
+                    .updatedAt(orderDto.getUpdatedAt())
                     .build();
+            
+            // Dùng save() của JpaRepository, nếu ID đã tồn tại nó sẽ update, nhưng ở đây là tạo mới
             Order savedOrder = orderRepository.save(order);
-            log.debug("Order saved with id: {}", savedOrder.getId());
 
-            // Step 2: Create OrderItem
-            OrderItem orderItem = OrderItem.builder()
-                    .orderId(savedOrder.getId())
-                    .productId(productId)
-                    .quantity(quantity)
-                    .unitPrice(unitPrice)
-                    .build();
-            OrderItem savedOrderItem = orderItemRepository.save(orderItem);
-            log.debug("OrderItem saved with id: {}", savedOrderItem.getId());
+            // 2. Save OrderItems & Update Inventory
+            for (OrderDto.OrderItemDto itemDto : orderDto.getItems()) {
+                // Lưu OrderItem
+                OrderItem item = OrderItem.builder()
+                        .orderId(savedOrder.getId())
+                        .productId(itemDto.getProductId().intValue())
+                        .quantity((short) itemDto.getQuantity())
+                        .unitPrice(itemDto.getUnitPrice())
+                        .build();
+                orderItemRepository.save(item);
 
-            // Step 3: Update Inventory
-            Optional<Inventory> inventoryOpt = inventoryRepository.findByProductId(productId);
-            if (inventoryOpt.isPresent()) {
-                Inventory inventory = inventoryOpt.get();
-                int newStock = inventory.getStock() - quantity;
-                inventory.setStock(newStock);
-                inventory.setUpdatedAt(LocalDateTime.now());
-                inventoryRepository.save(inventory);
-                log.debug("Inventory updated: productId={}, newStock={}", productId, newStock);
-            } else {
-                log.warn("Inventory not found for productId: {}", productId);
+                // Cập nhật Inventory trong DB (giảm số lượng)
+                inventoryRepository.findByProductId(itemDto.getProductId().intValue())
+                        .ifPresent(inventory -> {
+                            inventory.setStock(inventory.getStock() - itemDto.getQuantity());
+                            inventory.setUpdatedAt(LocalDateTime.now());
+                            inventoryRepository.save(inventory);
+                        });
             }
 
             long duration = System.currentTimeMillis() - startTime;
-            log.info("Checkout persisted successfully in {}ms for orderId: {}", duration, savedOrder.getId());
+            log.info("Order {} persisted successfully in {}ms", orderDto.getId(), duration);
 
         } catch (Exception e) {
-            log.error("Error persisting checkout for sessionId: {}", sessionId, e);
-            throw new RuntimeException("Failed to persist checkout", e);
+            log.error("Error persisting order: {}", orderDto.getId(), e);
+            throw new RuntimeException("Failed to persist order", e);
         }
     }
 
@@ -181,12 +180,22 @@ public class PersistenceService {
                     .stock(stock)
                     .build();
 
-            // Store in Redis
+            // Store in Redis (không lưu stock vào JSON product)
             String productKey = "product:" + productId;
-            String productJson = objectMapper.writeValueAsString(productWithStock);
+            ProductWithStockDto productOnly = ProductWithStockDto.builder()
+                    .id(productWithStock.getId())
+                    .name(productWithStock.getName())
+                    .description(productWithStock.getDescription())
+                    .price(productWithStock.getPrice())
+                    .imageUrl(productWithStock.getImageUrl())
+                    .category(productWithStock.getCategory())
+                    .stock(null)
+                    .build();
+            
+            String productJson = objectMapper.writeValueAsString(productOnly);
             redisTemplate.opsForValue().set(productKey, productJson);
             
-            // Lưu stock riêng
+            // Lưu stock riêng vào key inventory
             String stockKey = "inventory:" + productId;
             redisTemplate.opsForValue().set(stockKey, String.valueOf(stock));
 

@@ -1,5 +1,6 @@
 package iuh.fit.edu.orderservice.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import iuh.fit.edu.orderservice.client.InventoryClient;
 import iuh.fit.edu.orderservice.config.AppConfig;
 import iuh.fit.edu.orderservice.dto.CartDto;
@@ -46,9 +47,10 @@ public class OrderService {
     private static final String ORDER_KEY_PREFIX = "order:";
     private static final long   ORDER_TTL_HOURS  = 24;
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final RedisTemplate<String, String> redisTemplate;
     private final InventoryClient inventoryClient;
     private final RabbitTemplate rabbitTemplate;
+    private final ObjectMapper objectMapper;
 
     private final AtomicLong orderIdSequence = new AtomicLong(System.currentTimeMillis());
 
@@ -84,26 +86,36 @@ public class OrderService {
 
     public OrderDto getOrder(Long orderId) {
         String key = ORDER_KEY_PREFIX + orderId;
-        Object raw = redisTemplate.opsForValue().get(key);
+        String raw = redisTemplate.opsForValue().get(key);
         if (raw == null) {
             throw new BadRequestException("Order not found in Data Grid: " + orderId);
         }
-        return (OrderDto) raw;
+        try {
+            return objectMapper.readValue(raw, OrderDto.class);
+        } catch (Exception e) {
+            log.error("Error deserializing order from Redis: {}", e.getMessage());
+            throw new BadRequestException("Error reading order data");
+        }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private CartDto getCartFromRedis(String userId) {
-        Object raw = redisTemplate.opsForValue().get(CART_KEY_PREFIX + userId);
+        String raw = redisTemplate.opsForValue().get(CART_KEY_PREFIX + userId);
         if (raw == null) {
             throw new BadRequestException("Cart not found for userId: " + userId);
         }
-        CartDto cart = (CartDto) raw;
-        if (cart.getItems() == null || cart.getItems().isEmpty()) {
-            throw new BadRequestException("Cart is empty for userId: " + userId);
+        try {
+            CartDto cart = objectMapper.readValue(raw, CartDto.class);
+            if (cart.getItems() == null || cart.getItems().isEmpty()) {
+                throw new BadRequestException("Cart is empty for userId: " + userId);
+            }
+            log.debug("Cart loaded: userId={}, items={}", userId, cart.getItems().size());
+            return cart;
+        } catch (Exception e) {
+            log.error("Error deserializing cart from Redis for userId {}: {}", userId, e.getMessage());
+            throw new BadRequestException("Error reading cart data from Redis");
         }
-        log.debug("Cart loaded: userId={}, items={}", userId, cart.getItems().size());
-        return cart;
     }
 
     private void decreaseStock(CartDto cart) {
@@ -128,7 +140,7 @@ public class OrderService {
             }
         } catch (FeignException e) {
             log.error("Feign error calling inventory /decrease: {}", e.getMessage());
-            throw new BadRequestException("Cannot decrease stock: " + e.getMessage());
+            throw new BadRequestException("Thất bại: Không đủ tồn kho");
         }
         log.info("Stock decreased for {} product(s)", items.size());
     }
@@ -169,8 +181,13 @@ public class OrderService {
     }
 
     private void saveOrderToRedis(OrderDto order) {
-        String key = ORDER_KEY_PREFIX + order.getId();
-        redisTemplate.opsForValue().set(key, order, ORDER_TTL_HOURS, TimeUnit.HOURS);
-        log.info("Order saved to Redis: key={}", key);
+        try {
+            String key = ORDER_KEY_PREFIX + order.getId();
+            String json = objectMapper.writeValueAsString(order);
+            redisTemplate.opsForValue().set(key, json, ORDER_TTL_HOURS, TimeUnit.HOURS);
+            log.info("Order saved to Redis: key={}", key);
+        } catch (Exception e) {
+            log.error("Error saving order to Redis: {}", e.getMessage());
+        }
     }
 }
