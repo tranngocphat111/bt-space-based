@@ -39,6 +39,9 @@ public class AppProperties {
         public static class RoutingKey {
             private String listProducts = "persistence.product.list";
             private String productById = "persistence.product.get-by-id";
+            // Stock/Inventory routing keys (separated from product)
+            private String getStock = "persistence.stock.get";
+            private String updateStock = "persistence.stock.update";
         }
     }
 }
