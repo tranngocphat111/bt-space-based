@@ -25,7 +25,7 @@ public class ProductWithStockDto {
     @JsonProperty("price")
     private BigDecimal price;
 
-    @JsonProperty("image_url")
+    @JsonProperty("imageUrl")
     private String imageUrl;
 
     @JsonProperty("category")

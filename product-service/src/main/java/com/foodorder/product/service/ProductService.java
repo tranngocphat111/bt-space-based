@@ -62,7 +62,11 @@ public class ProductService {
                         cachedData,
                         objectMapper.getTypeFactory().constructCollectionType(List.class, ProductResponse.class)
                 );
-                return products;
+                
+                // Map lại để lấy đúng đường link ảnh
+                return products.stream()
+                        .map(productMapper::mapToResponse)
+                        .collect(java.util.stream.Collectors.toList());
             }
         } catch (Exception ex) {
             log.warn("Error reading from Redis cache: {}", ex.getMessage());
@@ -97,7 +101,9 @@ public class ProductService {
             if (cachedData != null) {
                 log.info("Cache HIT for product id: {}", productId);
                 ProductResponse product = objectMapper.readValue(cachedData, ProductResponse.class);
-                return product;
+                
+                // Map lại để lấy đúng đường link ảnh
+                return productMapper.mapToResponse(product);
             }
         } catch (Exception ex) {
             log.warn("Error reading from Redis cache for product {}: {}", productId, ex.getMessage());

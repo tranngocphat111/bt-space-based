@@ -1,5 +1,6 @@
 package iuh.fit.edu.persistenceworker.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import iuh.fit.edu.persistenceworker.dto.ProductWithStockDto;
 import iuh.fit.edu.persistenceworker.entity.Inventory;
 import iuh.fit.edu.persistenceworker.entity.Order;
@@ -29,19 +30,22 @@ public class PersistenceService {
     private final OrderItemRepository orderItemRepository;
     private final InventoryRepository inventoryRepository;
     private final ProductRepository productRepository;
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final RedisTemplate<String, String> redisTemplate;
+    private final ObjectMapper objectMapper;
 
     public PersistenceService(
             OrderRepository orderRepository,
             OrderItemRepository orderItemRepository,
             InventoryRepository inventoryRepository,
             ProductRepository productRepository,
-            RedisTemplate<String, Object> redisTemplate) {
+            RedisTemplate<String, String> redisTemplate,
+            ObjectMapper objectMapper) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.inventoryRepository = inventoryRepository;
         this.productRepository = productRepository;
         this.redisTemplate = redisTemplate;
+        this.objectMapper = objectMapper;
     }
 
     // ============ WRITE OPERATIONS ============
@@ -126,25 +130,21 @@ public class PersistenceService {
                             .build())
                     .collect(Collectors.toList());
 
-            // Store in Redis - Option 1: hash map toàn bộ danh sách (dùng cho PU1 GET /api/products)
-            redisTemplate.delete("products:all");
-            for (ProductWithStockDto product : productsWithStock) {
-                redisTemplate.opsForHash().put("products:all", "product:" + product.getId(), product);
-            }
-            log.debug("Stored products:all hash with {} entries", productsWithStock.size());
+            // Store in Redis - Option 1: List toàn bộ sản phẩm (dùng cho GET /api/products)
+            String productListKey = "product:list";
+            String productsJson = objectMapper.writeValueAsString(productsWithStock);
+            redisTemplate.opsForValue().set(productListKey, productsJson);
+            log.debug("Stored product:list with {} entries", productsWithStock.size());
 
-            // Store in Redis - Option 2: individual product keys for quick lookup (dùng cho PU1 GET /api/products/{id})
+            // Store in Redis - Option 2: Từng sản phẩm riêng lẻ (dùng cho GET /api/products/{id})
             for (ProductWithStockDto product : productsWithStock) {
                 String productKey = "product:" + product.getId();
-                redisTemplate.delete(productKey);
-                redisTemplate.opsForHash().putAll(productKey, Map.of(
-                        "id", product.getId().toString(),
-                        "name", product.getName(),
-                        "price", product.getPrice().toString(),
-                        "stock", product.getStock().toString(),
-                        "image_url", product.getImageUrl() != null ? product.getImageUrl() : "",
-                        "category", product.getCategory() != null ? product.getCategory() : ""
-                ));
+                String productJson = objectMapper.writeValueAsString(product);
+                redisTemplate.opsForValue().set(productKey, productJson);
+                
+                // Option 3: Lưu stock riêng (nếu product-service cần fetch riêng)
+                String stockKey = "inventory:" + product.getId();
+                redisTemplate.opsForValue().set(stockKey, product.getStock().toString());
             }
 
             long duration = System.currentTimeMillis() - startTime;
@@ -183,15 +183,12 @@ public class PersistenceService {
 
             // Store in Redis
             String productKey = "product:" + productId;
-            redisTemplate.delete(productKey);
-            redisTemplate.opsForHash().putAll(productKey, Map.of(
-                    "id", productWithStock.getId().toString(),
-                    "name", productWithStock.getName(),
-                    "price", productWithStock.getPrice().toString(),
-                    "stock", productWithStock.getStock().toString(),
-                    "image_url", productWithStock.getImageUrl() != null ? productWithStock.getImageUrl() : "",
-                    "category", productWithStock.getCategory() != null ? productWithStock.getCategory() : ""
-            ));
+            String productJson = objectMapper.writeValueAsString(productWithStock);
+            redisTemplate.opsForValue().set(productKey, productJson);
+            
+            // Lưu stock riêng
+            String stockKey = "inventory:" + productId;
+            redisTemplate.opsForValue().set(stockKey, String.valueOf(stock));
 
             log.debug("Product {} recovered to Redis", productId);
             return productWithStock;
