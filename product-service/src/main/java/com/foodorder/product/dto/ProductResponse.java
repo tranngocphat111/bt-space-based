@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * Product Response DTO
- * Sent to client with product info and stock
+ * Sent to client with product info only (stock is fetched separately from stock:{productId})
  */
 @Data
 @NoArgsConstructor
@@ -27,9 +27,6 @@ public class ProductResponse {
 
     @JsonProperty("price")
     private Double price;
-
-    @JsonProperty("stock")
-    private Integer stock;
 
     @JsonProperty("imageUrl")
     private String imageUrl;

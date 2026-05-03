@@ -35,24 +35,22 @@ public class ProductMapper {
     }
 
     /**
-     * Map product data with image URL
+     * Map product data with image URL (stock is fetched separately from stock:{productId})
      * @param id product id
      * @param name product name
      * @param description product description
      * @param price product price
-     * @param stock current stock
      * @param imageName image file name
      * @param category product category
      * @param createdAt created timestamp
      * @param updatedAt updated timestamp
-     * @return ProductResponse DTO
+     * @return ProductResponse DTO (without stock)
      */
     public ProductResponse toProductResponse(
             Long id,
             String name,
             String description,
             Double price,
-            Integer stock,
             String imageName,
             String category,
             String createdAt,
@@ -63,7 +61,6 @@ public class ProductMapper {
                 .name(name)
                 .description(description)
                 .price(price)
-                .stock(stock)
                 .imageUrl(buildImageUrl(imageName))
                 .category(category)
                 .createdAt(createdAt)
