@@ -5,13 +5,13 @@ import lombok.Data;
 
 /**
  * Request body cho POST /checkout.
- * Chỉ cần sessionId – order-service đọc cart từ Redis key "cart:{sessionId}".
  *
- * Mapping với orders.session_id
+ * Chỉ cần userId – order-service đọc cart từ Redis key "cart:{userId}",
+ * khớp với cách cart-service lưu: redisTemplate.opsForValue().set("cart:" + userId, cart)
  */
 @Data
 public class CheckoutRequest {
 
-    @NotBlank(message = "sessionId is required")
-    private String sessionId;
+    @NotBlank(message = "userId is required")
+    private String userId;
 }

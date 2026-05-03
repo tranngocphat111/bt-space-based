@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
  * Order Processing Unit (PU3) – Space-Based Architecture.
  *
  * Luồng checkout (không đụng DB):
- *  1. Đọc CartDto từ Redis  →  key: "cart:{sessionId}"
+ *  1. Đọc CartDto từ Redis  →  key: "cart:{userId}"
  *  2. Gọi inventory-service POST /decrease qua OpenFeign
  *  3. Build OrderDto (khớp bảng orders + order_items)
  *  4. Lưu OrderDto vào Redis  →  key: "order:{id}"  (TTL 24h)
@@ -55,10 +55,10 @@ public class OrderService {
     // ── Checkout ──────────────────────────────────────────────────────────────
 
     public OrderDto checkout(CheckoutRequest request) {
-        String sessionId = request.getSessionId();
+        String userId = request.getUserId();
 
         // 1. Đọc cart từ Redis
-        CartDto cart = getCartFromRedis(sessionId);
+        CartDto cart = getCartFromRedis(userId);
 
         // 2. Giảm tồn kho qua OpenFeign → inventory-service POST /decrease
         decreaseStock(cart);
@@ -70,12 +70,12 @@ public class OrderService {
         saveOrderToRedis(order);
 
         // 5. Xoá cart sau khi đặt hàng thành công
-        redisTemplate.delete(CART_KEY_PREFIX + sessionId);
-        log.debug("Cart deleted from Redis: sessionId={}", sessionId);
+        redisTemplate.delete(CART_KEY_PREFIX + userId);
+        log.debug("Cart deleted from Redis: userId={}", userId);
 
         // 6. Bắn event order_created → RabbitMQ
         rabbitTemplate.convertAndSend(AppConfig.ORDER_CREATED_QUEUE, order);
-        log.info("Event 'order_created' published: orderId={}, sessionId={}", order.getId(), sessionId);
+        log.info("Event 'order_created' published: orderId={}, userId={}", order.getId(), userId);
 
         return order;
     }
@@ -93,22 +93,32 @@ public class OrderService {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private CartDto getCartFromRedis(String sessionId) {
-        Object raw = redisTemplate.opsForValue().get(CART_KEY_PREFIX + sessionId);
+    private CartDto getCartFromRedis(String userId) {
+        Object raw = redisTemplate.opsForValue().get(CART_KEY_PREFIX + userId);
         if (raw == null) {
-            throw new BadRequestException("Cart not found for sessionId: " + sessionId);
+            throw new BadRequestException("Cart not found for userId: " + userId);
         }
         CartDto cart = (CartDto) raw;
         if (cart.getItems() == null || cart.getItems().isEmpty()) {
-            throw new BadRequestException("Cart is empty for sessionId: " + sessionId);
+            throw new BadRequestException("Cart is empty for userId: " + userId);
         }
-        log.debug("Cart loaded: sessionId={}, items={}", sessionId, cart.getItems().size());
+        log.debug("Cart loaded: userId={}, items={}", userId, cart.getItems().size());
         return cart;
     }
 
     private void decreaseStock(CartDto cart) {
         List<InventoryCheckoutRequest.Item> items = cart.getItems().stream()
-                .map(i -> new InventoryCheckoutRequest.Item(i.getProductId(), i.getQuantity()))
+                .map(i -> {
+                    // Cần parse productId (String) của cart sang Long của inventory-service
+                    Long productId;
+                    try {
+                        productId = Long.parseLong(i.getProductId());
+                    } catch (NumberFormatException e) {
+                        log.error("Invalid productId format in cart: {}", i.getProductId());
+                        throw new BadRequestException("Invalid productId format in cart: " + i.getProductId());
+                    }
+                    return new InventoryCheckoutRequest.Item(productId, i.getQuantity());
+                })
                 .collect(Collectors.toList());
 
         try {
@@ -129,21 +139,27 @@ public class OrderService {
 
         // Tính total_amount từ order_items
         List<OrderDto.OrderItemDto> orderItems = cart.getItems().stream()
-                .map(item -> new OrderDto.OrderItemDto(
-                        item.getProductId(),
+                .map(item -> {
+                     Long productId;
+                     try {
+                         productId = Long.parseLong(item.getProductId());
+                     } catch (NumberFormatException e) {
+                         throw new BadRequestException("Invalid productId format: " + item.getProductId());
+                     }
+                     return new OrderDto.OrderItemDto(
+                        productId,
                         item.getQuantity(),
-                        item.getUnitPrice() != null ? item.getUnitPrice() : BigDecimal.ZERO,
+                        BigDecimal.valueOf(item.getPrice()), // Convert long price to BigDecimal
                         item.getProductName()
-                ))
+                     );
+                })
                 .collect(Collectors.toList());
 
-        BigDecimal total = orderItems.stream()
-                .map(i -> i.getUnitPrice().multiply(BigDecimal.valueOf(i.getQuantity())))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal total = BigDecimal.valueOf(cart.getTotalAmount()); // Use totalAmount from CartResponse
 
         return new OrderDto(
                 id,
-                cart.getSessionId(),   // orders.session_id
+                cart.getUserId(),      // Lấy userId làm session_id cho DB
                 "pending",             // orders.status  (enum: pending | confirmed | cancelled)
                 total,                 // orders.total_amount
                 now,                   // orders.created_at

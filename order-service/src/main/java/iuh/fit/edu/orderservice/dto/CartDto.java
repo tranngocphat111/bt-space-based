@@ -5,34 +5,56 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
-import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Giỏ hàng lưu trong Redis (Data Grid) bởi Cart PU (PU2).
- * Redis key: "cart:{sessionId}"
+ * Mirror của CartResponse trong cart-service.
+ * Order-service đọc object này từ Redis (key: "cart:{userId}").
  *
- * Mapping với schema:
- *   orders.session_id  ← sessionId
- *   order_items.product_id, quantity, unit_price ← CartItemDto
+ * PHẢI khớp chính xác với cart.service.demo.dto.CartResponse:
+ *   - userId        : String
+ *   - items         : List<CartItemDto>  (mirror CartItemResponse)
+ *   - totalQuantity : int
+ *   - totalAmount   : long
+ *
+ * cart-service lưu với key: "cart:{userId}"
+ * → order-service dùng field userId (không phải sessionId)
  */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class CartDto implements Serializable {
 
-    /** Session ID của người dùng (thay cho userId) */
-    private String sessionId;
+    /** Khớp với CartResponse.userId */
+    private String userId;
 
-    private List<CartItemDto> items;
+    /** Khớp với CartResponse.items (List<CartItemResponse>) */
+    private List<CartItemDto> items = new ArrayList<>();
 
+    /** Khớp với CartResponse.totalQuantity */
+    private int totalQuantity;
+
+    /** Khớp với CartResponse.totalAmount */
+    private long totalAmount;
+
+    /**
+     * Mirror của CartItemResponse trong cart-service.
+     * Các field và kiểu dữ liệu phải khớp chính xác:
+     *   productId   : String  (cart dùng String, không phải Long)
+     *   productName : String
+     *   price       : long    (cart dùng long, không phải BigDecimal)
+     *   quantity    : int
+     *   subtotal    : long
+     */
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CartItemDto implements Serializable {
-        private Long productId;
-        private String productName;   // để hiển thị, không lưu DB
+        private String productId;    // String, khớp CartItemResponse.productId
+        private String productName;
+        private long price;          // long, khớp CartItemResponse.price
         private int quantity;
-        private BigDecimal unitPrice;
+        private long subtotal;       // long, khớp CartItemResponse.subtotal
     }
 }

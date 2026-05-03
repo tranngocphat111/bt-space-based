@@ -5,6 +5,7 @@ import iuh.fit.edu.orderservice.dto.OrderDto;
 import iuh.fit.edu.orderservice.service.OrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
