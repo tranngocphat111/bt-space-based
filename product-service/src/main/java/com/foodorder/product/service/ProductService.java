@@ -44,15 +44,16 @@ public class ProductService {
 
     /**
      * Get all products
-     * Logic: Try Redis cache -> Cache miss -> Query via MQ -> Backfill cache -> Return
+     * Logic: Try Redis cache only (no persistence service fallback)
+     * Cache must be pre-populated during startup (PU1)
      * @return List of ProductResponse
      */
     public List<ProductResponse> getAllProducts() {
-        log.info("Getting all products");
+        log.info("Getting all products from cache");
 
         String cacheKey = CacheKeyUtil.getProductListKey();
 
-        // Step 1: Try to get from Redis cache
+        // Try to get from Redis cache only
         try {
             String cachedData = redisTemplate.opsForValue().get(cacheKey);
             if (cachedData != null) {
@@ -67,34 +68,20 @@ public class ProductService {
             log.warn("Error reading from Redis cache: {}", ex.getMessage());
         }
 
-        // Step 2: Cache miss - Query via MQ to Persistence Service
-        log.info("Cache MISS for product list, querying Persistence Service");
-        ProductMessageResponse mqResponse = queryViaMqService.queryProductList();
-
-        List<ProductResponse> products = mqResponse.getProducts();
-
-        // Step 3: Backfill cache with TTL
-        try {
-            String jsonData = objectMapper.writeValueAsString(products);
-            long ttl = appProperties.getCache().getTtlSeconds();
-            redisTemplate.opsForValue().set(cacheKey, jsonData, ttl, TimeUnit.SECONDS);
-            log.info("Cache backfilled for product list with TTL: {} seconds", ttl);
-        } catch (Exception ex) {
-            log.warn("Error writing to Redis cache: {}", ex.getMessage());
-        }
-
-        // Step 4: Return response
-        return products;
+        // Cache miss - return empty list (data must be loaded during startup)
+        log.warn("Cache MISS for product list - returning empty list");
+        return List.of();
     }
 
     /**
      * Get product by ID
-     * Logic: Try Redis cache -> Cache miss -> Query via MQ -> Backfill cache -> Return
+     * Logic: Try Redis cache only (no persistence service fallback)
+     * Cache must be pre-populated during startup (PU1)
      * @param productId product id
      * @return ProductResponse
      */
     public ProductResponse getProductById(Long productId) {
-        log.info("Getting product by id: {}", productId);
+        log.info("Getting product by id: {} from cache", productId);
 
         // Validate input
         if (productId == null || productId <= 0) {
@@ -104,7 +91,7 @@ public class ProductService {
 
         String cacheKey = CacheKeyUtil.getProductDetailKey(productId);
 
-        // Step 1: Try to get from Redis cache
+        // Try to get from Redis cache only
         try {
             String cachedData = redisTemplate.opsForValue().get(cacheKey);
             if (cachedData != null) {
@@ -116,29 +103,9 @@ public class ProductService {
             log.warn("Error reading from Redis cache for product {}: {}", productId, ex.getMessage());
         }
 
-        // Step 2: Cache miss - Query via MQ to Persistence Service
-        log.info("Cache MISS for product id: {}, querying Persistence Service", productId);
-        ProductMessageResponse mqResponse = queryViaMqService.queryProductById(productId);
-
-        if (mqResponse.getProducts() == null || mqResponse.getProducts().isEmpty()) {
-            log.warn("Product not found by id: {}", productId);
-            throw new NotFoundException("Product with id " + productId + " not found");
-        }
-
-        ProductResponse product = mqResponse.getProducts().get(0);
-
-        // Step 3: Backfill cache with TTL
-        try {
-            String jsonData = objectMapper.writeValueAsString(product);
-            long ttl = appProperties.getCache().getTtlSeconds();
-            redisTemplate.opsForValue().set(cacheKey, jsonData, ttl, TimeUnit.SECONDS);
-            log.info("Cache backfilled for product id: {} with TTL: {} seconds", productId, ttl);
-        } catch (Exception ex) {
-            log.warn("Error writing to Redis cache: {}", ex.getMessage());
-        }
-
-        // Step 4: Return response
-        return product;
+        // Cache miss - product data must be loaded during startup (PU1)
+        log.warn("Cache MISS for product id: {} - product not found in cache", productId);
+        throw new NotFoundException("Product with id " + productId + " not found in cache. Please wait for cache initialization.");
     }
 
     /**
