@@ -21,6 +21,6 @@ public interface InventoryClient {
      * @param request danh sách { productId, quantity } cần giảm
      * @return ResponseEntity với status 200 nếu thành công
      */
-    @PostMapping("/decrease")
-    ResponseEntity<Void> decreaseStock(@RequestBody InventoryCheckoutRequest request);
+    @PostMapping("/api/stock/decrease")
+    ResponseEntity<String> decreaseStock(@RequestBody InventoryCheckoutRequest request);
 }

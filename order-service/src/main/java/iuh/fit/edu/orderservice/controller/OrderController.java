@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
  * GET  /orders/{orderId}  – Tra cứu order từ Redis (không query DB)
  */
 @RestController
+@RequestMapping("/api")
 @RequiredArgsConstructor
 public class OrderController {
 

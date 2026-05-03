@@ -122,7 +122,7 @@ public class OrderService {
                 .collect(Collectors.toList());
 
         try {
-            ResponseEntity<Void> resp = inventoryClient.decreaseStock(new InventoryCheckoutRequest(items));
+            ResponseEntity<String> resp = inventoryClient.decreaseStock(new InventoryCheckoutRequest(items));
             if (resp == null || !resp.getStatusCode().is2xxSuccessful()) {
                 throw new BadRequestException("Inventory service error when decreasing stock");
             }
