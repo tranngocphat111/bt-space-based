@@ -1,0 +1,49 @@
+# Logs
+*.log
+logs/
+
+# Maven
+target/
+.mvn/
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.eclipse/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+.m2/
+node_modules/
+
+# Build
+build/
+dist/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+.~*
+
+# Environment
+.env
+.env.local
+.env.*.local
