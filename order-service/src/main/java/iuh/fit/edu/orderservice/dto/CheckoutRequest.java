@@ -10,6 +10,7 @@ import lombok.Data;
  * khớp với cách cart-service lưu: redisTemplate.opsForValue().set("cart:" + userId, cart)
  */
 @Data
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
 public class CheckoutRequest {
 
     @NotBlank(message = "userId is required")

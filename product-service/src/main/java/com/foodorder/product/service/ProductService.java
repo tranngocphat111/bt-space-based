@@ -62,7 +62,21 @@ public class ProductService {
                         cachedData,
                         objectMapper.getTypeFactory().constructCollectionType(List.class, ProductResponse.class)
                 );
-                return products;
+                
+                // Map lại để lấy đúng đường link ảnh và bổ sung thông tin tồn kho từ key inventory
+                return products.stream()
+                        .map(p -> {
+                            // 1. Map lại image URL
+                            ProductResponse mapped = productMapper.mapToResponse(p);
+                            
+                            // 2. Lấy stock từ key inventory:{id}
+                            String inventoryKey = "inventory:" + mapped.getId();
+                            String stockStr = redisTemplate.opsForValue().get(inventoryKey);
+                            mapped.setStock(stockStr != null ? Integer.parseInt(stockStr) : 0);
+                            
+                            return mapped;
+                        })
+                        .collect(java.util.stream.Collectors.toList());
             }
         } catch (Exception ex) {
             log.warn("Error reading from Redis cache: {}", ex.getMessage());
@@ -97,7 +111,16 @@ public class ProductService {
             if (cachedData != null) {
                 log.info("Cache HIT for product id: {}", productId);
                 ProductResponse product = objectMapper.readValue(cachedData, ProductResponse.class);
-                return product;
+                
+                // Map lại để lấy đúng đường link ảnh
+                ProductResponse mapped = productMapper.mapToResponse(product);
+                
+                // Bổ sung thông tin tồn kho từ key inventory:{id}
+                String inventoryKey = "inventory:" + mapped.getId();
+                String stockStr = redisTemplate.opsForValue().get(inventoryKey);
+                mapped.setStock(stockStr != null ? Integer.parseInt(stockStr) : 0);
+                
+                return mapped;
             }
         } catch (Exception ex) {
             log.warn("Error reading from Redis cache for product {}: {}", productId, ex.getMessage());

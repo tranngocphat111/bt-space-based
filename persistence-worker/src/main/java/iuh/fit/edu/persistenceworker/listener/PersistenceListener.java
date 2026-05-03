@@ -22,31 +22,25 @@ public class PersistenceListener {
     }
 
     /**
-     * Listens to 'mq' queue for checkout messages
+     * Listens to 'order_created' queue for checkout messages
      * Persists order and inventory updates to database
      */
-    @RabbitListener(queues = "mq")
-    public void handleCheckoutMessage(CheckoutMessage message) {
-        Integer startTime = Math.toIntExact(System.currentTimeMillis());
+    @RabbitListener(queues = "order_created")
+    public void handleOrderCreated(iuh.fit.edu.persistenceworker.dto.OrderDto orderDto) {
+        long startTime = System.currentTimeMillis();
         
         try {
-            log.info("Received checkout message: sessionId={}, productId={}, quantity={}, totalAmount={}",
-                    message.getSessionId(), message.getProductId(), message.getQuantity(), message.getTotalAmount());
+            log.info("Received order created message: orderId={}, sessionId={}, items={}",
+                    orderDto.getId(), orderDto.getSessionId(), orderDto.getItems().size());
 
-            persistenceService.persistCheckout(
-                    message.getSessionId(),
-                    message.getProductId(),
-                    message.getQuantity(),
-                    message.getTotalAmount(),
-                    message.getUnitPrice()
-            );
+            persistenceService.persistOrder(orderDto);
 
-            Integer duration = Math.toIntExact(System.currentTimeMillis() - startTime);
-            log.info("Checkout message processed successfully in {}ms", duration);
+            long duration = System.currentTimeMillis() - startTime;
+            log.info("Order created message processed successfully in {}ms", duration);
 
         } catch (Exception e) {
-            log.error("Error processing checkout message: {}", message, e);
-            throw new RuntimeException("Failed to process checkout message", e);
+            log.error("Error processing order created message: {}", orderDto.getId(), e);
+            throw new RuntimeException("Failed to process order created message", e);
         }
     }
 

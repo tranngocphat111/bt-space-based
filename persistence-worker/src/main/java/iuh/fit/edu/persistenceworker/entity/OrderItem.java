@@ -20,7 +20,7 @@ public class OrderItem {
     private Integer id;
 
     @Column(nullable = false)
-    private Integer orderId;
+    private Long orderId;
 
     @Column(nullable = false)
     private Integer productId;

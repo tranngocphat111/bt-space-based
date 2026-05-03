@@ -39,4 +39,7 @@ public class ProductResponse {
 
     @JsonProperty("updatedAt")
     private String updatedAt;
+
+    @JsonProperty("stock")
+    private Integer stock;
 }

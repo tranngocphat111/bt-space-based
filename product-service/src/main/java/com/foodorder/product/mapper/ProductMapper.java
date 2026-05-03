@@ -67,4 +67,15 @@ public class ProductMapper {
                 .updatedAt(updatedAt)
                 .build();
     }
+
+    /**
+     * Map lại ProductResponse từ Redis để lấy đúng đường link ảnh
+     * @param response DTO từ Redis
+     * @return DTO với imageUrl đã được transform
+     */
+    public ProductResponse mapToResponse(ProductResponse response) {
+        if (response == null) return null;
+        response.setImageUrl(buildImageUrl(response.getImageUrl()));
+        return response;
+    }
 }

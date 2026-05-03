@@ -1,5 +1,7 @@
 package iuh.fit.edu.persistenceworker.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import iuh.fit.edu.persistenceworker.dto.OrderDto;
 import iuh.fit.edu.persistenceworker.dto.ProductWithStockDto;
 import iuh.fit.edu.persistenceworker.entity.Inventory;
 import iuh.fit.edu.persistenceworker.entity.Order;
@@ -29,71 +31,72 @@ public class PersistenceService {
     private final OrderItemRepository orderItemRepository;
     private final InventoryRepository inventoryRepository;
     private final ProductRepository productRepository;
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final RedisTemplate<String, String> redisTemplate;
+    private final ObjectMapper objectMapper;
 
     public PersistenceService(
             OrderRepository orderRepository,
             OrderItemRepository orderItemRepository,
             InventoryRepository inventoryRepository,
             ProductRepository productRepository,
-            RedisTemplate<String, Object> redisTemplate) {
+            RedisTemplate<String, String> redisTemplate,
+            ObjectMapper objectMapper) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.inventoryRepository = inventoryRepository;
         this.productRepository = productRepository;
         this.redisTemplate = redisTemplate;
+        this.objectMapper = objectMapper;
     }
 
     // ============ WRITE OPERATIONS ============
 
     @Transactional
-    public void persistCheckout(String sessionId, Integer productId, Short  quantity, BigDecimal totalAmount, BigDecimal unitPrice) {
+    public void persistOrder(OrderDto orderDto) {
         long startTime = System.currentTimeMillis();
-        
         try {
-            log.info("Processing checkout: sessionId={}, productId={}, quantity={}, totalAmount={}",
-                    sessionId, productId, quantity, totalAmount);
+            log.info("Processing OrderDto persistence: id={}, sessionId={}, items={}",
+                    orderDto.getId(), orderDto.getSessionId(), orderDto.getItems().size());
 
-            // Step 1: Create Order
+            // 1. Save Order (khớp id từ Redis để đồng bộ)
             Order order = Order.builder()
-                    .sessionId(sessionId)
-                    .status(Order.OrderStatus.confirmed)
-                    .totalAmount(totalAmount)
-                    .createdAt(LocalDateTime.now())
-                    .updatedAt(LocalDateTime.now())
+                    .id(orderDto.getId()) // Giữ nguyên ID từ Redis
+                    .sessionId(orderDto.getSessionId())
+                    .status(Order.OrderStatus.valueOf(orderDto.getStatus()))
+                    .totalAmount(orderDto.getTotalAmount())
+                    .createdAt(orderDto.getCreatedAt())
+                    .updatedAt(orderDto.getUpdatedAt())
                     .build();
+            
+            // Dùng save() của JpaRepository, nếu ID đã tồn tại nó sẽ update, nhưng ở đây là tạo mới
             Order savedOrder = orderRepository.save(order);
-            log.debug("Order saved with id: {}", savedOrder.getId());
 
-            // Step 2: Create OrderItem
-            OrderItem orderItem = OrderItem.builder()
-                    .orderId(savedOrder.getId())
-                    .productId(productId)
-                    .quantity(quantity)
-                    .unitPrice(unitPrice)
-                    .build();
-            OrderItem savedOrderItem = orderItemRepository.save(orderItem);
-            log.debug("OrderItem saved with id: {}", savedOrderItem.getId());
+            // 2. Save OrderItems & Update Inventory
+            for (OrderDto.OrderItemDto itemDto : orderDto.getItems()) {
+                // Lưu OrderItem
+                OrderItem item = OrderItem.builder()
+                        .orderId(savedOrder.getId())
+                        .productId(itemDto.getProductId().intValue())
+                        .quantity((short) itemDto.getQuantity())
+                        .unitPrice(itemDto.getUnitPrice())
+                        .build();
+                orderItemRepository.save(item);
 
-            // Step 3: Update Inventory
-            Optional<Inventory> inventoryOpt = inventoryRepository.findByProductId(productId);
-            if (inventoryOpt.isPresent()) {
-                Inventory inventory = inventoryOpt.get();
-                int newStock = inventory.getStock() - quantity;
-                inventory.setStock(newStock);
-                inventory.setUpdatedAt(LocalDateTime.now());
-                inventoryRepository.save(inventory);
-                log.debug("Inventory updated: productId={}, newStock={}", productId, newStock);
-            } else {
-                log.warn("Inventory not found for productId: {}", productId);
+                // Cập nhật Inventory trong DB (giảm số lượng)
+                inventoryRepository.findByProductId(itemDto.getProductId().intValue())
+                        .ifPresent(inventory -> {
+                            inventory.setStock(inventory.getStock() - itemDto.getQuantity());
+                            inventory.setUpdatedAt(LocalDateTime.now());
+                            inventoryRepository.save(inventory);
+                        });
             }
 
             long duration = System.currentTimeMillis() - startTime;
-            log.info("Checkout persisted successfully in {}ms for orderId: {}", duration, savedOrder.getId());
+            log.info("Order {} persisted successfully in {}ms", orderDto.getId(), duration);
 
         } catch (Exception e) {
-            log.error("Error persisting checkout for sessionId: {}", sessionId, e);
-            throw new RuntimeException("Failed to persist checkout", e);
+            log.error("Error persisting order: {}", orderDto.getId(), e);
+            throw new RuntimeException("Failed to persist order", e);
         }
     }
 
@@ -126,25 +129,21 @@ public class PersistenceService {
                             .build())
                     .collect(Collectors.toList());
 
-            // Store in Redis - Option 1: hash map toàn bộ danh sách (dùng cho PU1 GET /api/products)
-            redisTemplate.delete("products:all");
-            for (ProductWithStockDto product : productsWithStock) {
-                redisTemplate.opsForHash().put("products:all", "product:" + product.getId(), product);
-            }
-            log.debug("Stored products:all hash with {} entries", productsWithStock.size());
+            // Store in Redis - Option 1: List toàn bộ sản phẩm (dùng cho GET /api/products)
+            String productListKey = "product:list";
+            String productsJson = objectMapper.writeValueAsString(productsWithStock);
+            redisTemplate.opsForValue().set(productListKey, productsJson);
+            log.debug("Stored product:list with {} entries", productsWithStock.size());
 
-            // Store in Redis - Option 2: individual product keys for quick lookup (dùng cho PU1 GET /api/products/{id})
+            // Store in Redis - Option 2: Từng sản phẩm riêng lẻ (dùng cho GET /api/products/{id})
             for (ProductWithStockDto product : productsWithStock) {
                 String productKey = "product:" + product.getId();
-                redisTemplate.delete(productKey);
-                redisTemplate.opsForHash().putAll(productKey, Map.of(
-                        "id", product.getId().toString(),
-                        "name", product.getName(),
-                        "price", product.getPrice().toString(),
-                        "stock", product.getStock().toString(),
-                        "image_url", product.getImageUrl() != null ? product.getImageUrl() : "",
-                        "category", product.getCategory() != null ? product.getCategory() : ""
-                ));
+                String productJson = objectMapper.writeValueAsString(product);
+                redisTemplate.opsForValue().set(productKey, productJson);
+                
+                // Option 3: Lưu stock riêng (nếu product-service cần fetch riêng)
+                String stockKey = "inventory:" + product.getId();
+                redisTemplate.opsForValue().set(stockKey, product.getStock().toString());
             }
 
             long duration = System.currentTimeMillis() - startTime;
@@ -181,17 +180,24 @@ public class PersistenceService {
                     .stock(stock)
                     .build();
 
-            // Store in Redis
+            // Store in Redis (không lưu stock vào JSON product)
             String productKey = "product:" + productId;
-            redisTemplate.delete(productKey);
-            redisTemplate.opsForHash().putAll(productKey, Map.of(
-                    "id", productWithStock.getId().toString(),
-                    "name", productWithStock.getName(),
-                    "price", productWithStock.getPrice().toString(),
-                    "stock", productWithStock.getStock().toString(),
-                    "image_url", productWithStock.getImageUrl() != null ? productWithStock.getImageUrl() : "",
-                    "category", productWithStock.getCategory() != null ? productWithStock.getCategory() : ""
-            ));
+            ProductWithStockDto productOnly = ProductWithStockDto.builder()
+                    .id(productWithStock.getId())
+                    .name(productWithStock.getName())
+                    .description(productWithStock.getDescription())
+                    .price(productWithStock.getPrice())
+                    .imageUrl(productWithStock.getImageUrl())
+                    .category(productWithStock.getCategory())
+                    .stock(null)
+                    .build();
+            
+            String productJson = objectMapper.writeValueAsString(productOnly);
+            redisTemplate.opsForValue().set(productKey, productJson);
+            
+            // Lưu stock riêng vào key inventory
+            String stockKey = "inventory:" + productId;
+            redisTemplate.opsForValue().set(stockKey, String.valueOf(stock));
 
             log.debug("Product {} recovered to Redis", productId);
             return productWithStock;

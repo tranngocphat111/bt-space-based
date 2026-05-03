@@ -27,7 +27,7 @@ public class OrderController {
      * Body: { "sessionId": "sess_abc123" }
      */
     @PostMapping("/checkout")
-    @ResponseStatus(HttpStatus.CREATED)
+    @ResponseStatus(HttpStatus.OK)
     public OrderDto checkout(@Valid @RequestBody CheckoutRequest request) {
         return orderService.checkout(request);
     }
